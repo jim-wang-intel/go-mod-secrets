@@ -121,7 +121,7 @@ func (immc *InMemoryMockCaller) Do(req *http.Request) (*http.Response, error) {
 func TestNewSecretClient(t *testing.T) {
 	authToken := "testToken"
 	var tokenDataMap sync.Map
-	tokenDataMap.Store(authToken, TookenLookupMetadata{
+	tokenDataMap.Store(authToken, TokenLookupMetadata{
 		Renewable: true,
 		Ttl:       10000,
 		Period:    10000,
@@ -645,31 +645,31 @@ func TestMultipleTokneRenewals(t *testing.T) {
 	tokenPeriod := 6
 	var tokenDataMap sync.Map
 	// ttl > half of period
-	tokenDataMap.Store("testToken1", TookenLookupMetadata{
+	tokenDataMap.Store("testToken1", TokenLookupMetadata{
 		Renewable: true,
 		Ttl:       tokenPeriod * 7 / 10,
 		Period:    tokenPeriod,
 	})
 	// ttl = half of period
-	tokenDataMap.Store("testToken2", TookenLookupMetadata{
+	tokenDataMap.Store("testToken2", TokenLookupMetadata{
 		Renewable: true,
 		Ttl:       tokenPeriod / 2,
 		Period:    tokenPeriod,
 	})
 	// ttl < half of period
-	tokenDataMap.Store("testToken3", TookenLookupMetadata{
+	tokenDataMap.Store("testToken3", TokenLookupMetadata{
 		Renewable: true,
 		Ttl:       tokenPeriod * 3 / 10,
 		Period:    tokenPeriod,
 	})
 	// expired token
-	tokenDataMap.Store("expiredToken", TookenLookupMetadata{
+	tokenDataMap.Store("expiredToken", TokenLookupMetadata{
 		Renewable: true,
 		Ttl:       0,
 		Period:    tokenPeriod,
 	})
 	// not renewable token
-	tokenDataMap.Store("unrenewableToken", TookenLookupMetadata{
+	tokenDataMap.Store("unrenewableToken", TokenLookupMetadata{
 		Renewable: false,
 		Ttl:       0,
 		Period:    tokenPeriod,
@@ -785,7 +785,7 @@ func TestMultipleTokneRenewals(t *testing.T) {
 			if !test.expectError && lookupTokenData.Data.Renewable &&
 				lookupTokenData.Data.Ttl < tokenPeriod/2 {
 				tokenData, _ := tokenDataMap.Load(test.authToken)
-				tokenTtl := tokenData.(TookenLookupMetadata).Ttl
+				tokenTtl := tokenData.(TokenLookupMetadata).Ttl
 				t.Errorf("the token period %d and failed to renew token: the current TTL %d and the old TTL: %d",
 					tokenPeriod, lookupTokenData.Data.Ttl, tokenTtl)
 			}
@@ -807,7 +807,7 @@ func getMockTokenServer(tokenDataMap *sync.Map) *httptest.Server {
 				_, _ = rw.Write([]byte("permission denied"))
 			} else {
 				resp := &TokenLookupResponse{
-					Data: sampleTokenLookup.(TookenLookupMetadata),
+					Data: sampleTokenLookup.(TokenLookupMetadata),
 				}
 				if ret, err := json.Marshal(resp); err != nil {
 					rw.WriteHeader(500)
@@ -824,15 +824,15 @@ func getMockTokenServer(tokenDataMap *sync.Map) *httptest.Server {
 				rw.WriteHeader(403)
 				_, _ = rw.Write([]byte("permission denied"))
 			} else {
-				currentTtl := sampleTokenLookup.(TookenLookupMetadata).Ttl
+				currentTtl := sampleTokenLookup.(TokenLookupMetadata).Ttl
 				if currentTtl <= 0 {
 					// already expired
 					rw.WriteHeader(403)
 					_, _ = rw.Write([]byte("permission denied"))
 				} else {
-					tokenPeriod := sampleTokenLookup.(TookenLookupMetadata).Period
+					tokenPeriod := sampleTokenLookup.(TokenLookupMetadata).Period
 
-					tokenDataMap.Store(token, TookenLookupMetadata{
+					tokenDataMap.Store(token, TokenLookupMetadata{
 						Renewable: true,
 						Ttl:       tokenPeriod,
 						Period:    tokenPeriod,

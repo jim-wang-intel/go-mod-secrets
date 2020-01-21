@@ -14,7 +14,7 @@
 
 package vault
 
-type TookenLookupMetadata struct {
+type TokenLookupMetadata struct {
 	ExpireTime string `json:"expire_time"`
 	Period     int    `json:"period"` // in seconds
 	Renewable  bool   `json:"renewable"`
@@ -22,5 +22,5 @@ type TookenLookupMetadata struct {
 }
 
 type TokenLookupResponse struct {
-	Data TookenLookupMetadata
+	Data TokenLookupMetadata
 }

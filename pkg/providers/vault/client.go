@@ -80,7 +80,7 @@ func NewSecretClient(config SecretConfig, lc logger.LoggingClient, bkgCtx contex
 	if bkgCtx == nil {
 		bkgCtx = context.Background()
 	}
-	// if there is contex already associated with the given token,
+	// if there is context already associated with the given token,
 	// then we cancel it first
 	if cancel, exists := vaultTokenToCancelFunc[tokenStr]; exists {
 		cancel()
