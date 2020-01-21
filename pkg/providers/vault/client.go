@@ -116,7 +116,7 @@ func (c Client) refreshToken(ctx context.Context, errChan chan<- error) error {
 	renewInterval := tokenPeriod / 2
 	if renewInterval <= 0 {
 		// no renew
-		c.lc.Warn(fmt.Sprintf("token '%s' renewInternal is 0, no token renewal", token))
+		c.lc.Warn(fmt.Sprintf("token '%s' renewInterval is 0, no token renewal", token))
 		return nil
 	}
 
