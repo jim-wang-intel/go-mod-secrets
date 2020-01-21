@@ -16,14 +16,22 @@ package vault
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/edgexfoundry/go-mod-core-contracts/clients/logger"
 
 	"github.com/edgexfoundry/go-mod-secrets/pkg"
 )
@@ -111,12 +119,30 @@ func (immc *InMemoryMockCaller) Do(req *http.Request) (*http.Response, error) {
 }
 
 func TestNewSecretClient(t *testing.T) {
-	cfgHTTP := SecretConfig{Host: "localhost", Port: 8080}
-	cfgInvalidCertPath := SecretConfig{Host: "localhost", Port: 8080, RootCaCertPath: "/non-existent-directory/rootCa.crt"}
-	cfgNamespace := SecretConfig{Host: "localhost", Port: 8080, Namespace: "database"}
-	cfgInvalidTime := SecretConfig{Host: "localhost", Port: 8080, RetryWaitPeriod: "not a real time spec"}
-	cfgValidTime := SecretConfig{Host: "localhost", Port: 8080, RetryWaitPeriod: "1s"}
+	authToken := "testToken"
+	var tokenDataMap sync.Map
+	tokenDataMap.Store(authToken, TookenLookupMetadata{
+		Renewable: true,
+		Ttl:       10000,
+		Period:    10000,
+	})
+	server := getMockTokenServer(&tokenDataMap)
+	defer server.Close()
+	serverUrl, err := url.Parse(server.URL)
+	if err != nil {
+		t.Errorf("error on parsing server url %s: %s", server.URL, err)
+	}
+	host, port, _ := net.SplitHostPort(serverUrl.Host)
+	portNum, _ := strconv.Atoi(port)
+
+	cfgHTTP := SecretConfig{Protocol: "http", Host: host, Port: portNum, Authentication: AuthenticationInfo{AuthToken: authToken}}
+	cfgInvalidCertPath := SecretConfig{Protocol: "https", Host: host, Port: portNum, RootCaCertPath: "/non-existent-directory/rootCa.crt", Authentication: AuthenticationInfo{AuthToken: authToken}}
+	cfgNamespace := SecretConfig{Protocol: "http", Host: host, Port: portNum, Namespace: "database", Authentication: AuthenticationInfo{AuthToken: authToken}}
+	cfgInvalidTime := SecretConfig{Protocol: "http", Host: host, Port: portNum, RetryWaitPeriod: "not a real time spec", Authentication: AuthenticationInfo{AuthToken: authToken}}
+	cfgValidTime := SecretConfig{Protocol: "http", Host: host, Port: portNum, RetryWaitPeriod: "1s", Authentication: AuthenticationInfo{AuthToken: authToken}}
+	cfgEmptyToken := SecretConfig{Protocol: "http", Host: host, Port: portNum, RetryWaitPeriod: "1s"}
 	s := time.Second
+	bkgCtx := context.Background()
 
 	tests := []struct {
 		name         string
@@ -129,10 +155,14 @@ func TestNewSecretClient(t *testing.T) {
 		{"NewSecretClient with Namespace", cfgNamespace, false, nil},
 		{"NewSecretClient with invalid RetryWaitPeriod", cfgInvalidTime, true, nil},
 		{"NewSecretClient with valid RetryWaitPeriod", cfgValidTime, false, &s},
+		{"NewSecretClient with empty token", cfgEmptyToken, true, nil},
 	}
+	mockLogger := logger.MockLogger{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c, err := NewSecretClient(tt.cfg)
+			errCh := make(chan error, 1)
+
+			c, err := NewSecretClient(tt.cfg, mockLogger, bkgCtx, errCh)
 			if err != nil {
 				if !tt.expectErr {
 					t.Errorf("unexpected error: %v", err)
@@ -608,4 +638,213 @@ func TestHttpSecretStoreManager_SetValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMultipleTokneRenewals(t *testing.T) {
+	// setup
+	tokenPeriod := 6
+	var tokenDataMap sync.Map
+	// ttl > half of period
+	tokenDataMap.Store("testToken1", TookenLookupMetadata{
+		Renewable: true,
+		Ttl:       tokenPeriod * 7 / 10,
+		Period:    tokenPeriod,
+	})
+	// ttl = half of period
+	tokenDataMap.Store("testToken2", TookenLookupMetadata{
+		Renewable: true,
+		Ttl:       tokenPeriod / 2,
+		Period:    tokenPeriod,
+	})
+	// ttl < half of period
+	tokenDataMap.Store("testToken3", TookenLookupMetadata{
+		Renewable: true,
+		Ttl:       tokenPeriod * 3 / 10,
+		Period:    tokenPeriod,
+	})
+	// expired token
+	tokenDataMap.Store("expiredToken", TookenLookupMetadata{
+		Renewable: true,
+		Ttl:       0,
+		Period:    tokenPeriod,
+	})
+	// not renewable token
+	tokenDataMap.Store("unrenewableToken", TookenLookupMetadata{
+		Renewable: false,
+		Ttl:       0,
+		Period:    tokenPeriod,
+	})
+
+	server := getMockTokenServer(&tokenDataMap)
+	defer server.Close()
+
+	serverUrl, err := url.Parse(server.URL)
+	if err != nil {
+		t.Errorf("error on parsing server url %s: %s", server.URL, err)
+	}
+	host, port, _ := net.SplitHostPort(serverUrl.Host)
+	portNum, _ := strconv.Atoi(port)
+
+	bkgCtx := context.Background()
+
+	// error channel to receive any error from background process
+	errCh := make(chan error, 1)
+	go func() {
+		tokenErr := <-errCh
+
+		if tokenErr != nil {
+			t.Errorf("error on handling token renewal: %s", tokenErr)
+		}
+	}()
+
+	mockLogger := logger.MockLogger{}
+	tests := []struct {
+		name              string
+		authToken         string
+		expectError       bool
+		expectedErrorType error
+	}{
+		{
+			name:              "New secret client with testToken1, more than half of TTL remaining",
+			authToken:         "testToken1",
+			expectError:       false,
+			expectedErrorType: nil,
+		},
+		{
+			name:              "New secret client with the same first token again",
+			authToken:         "testToken1",
+			expectError:       false,
+			expectedErrorType: nil,
+		},
+		{
+			name:              "New secret client with testToken2, half of TTL remaining",
+			authToken:         "testToken2",
+			expectError:       false,
+			expectedErrorType: nil,
+		},
+		{
+			name:              "New secret client with testToken3, less than half of TTL remaining",
+			authToken:         "testToken3",
+			expectError:       false,
+			expectedErrorType: nil,
+		},
+		{
+			name:              "New secret client with expired token, no TTL remaining",
+			authToken:         "expiredToken",
+			expectError:       true,
+			expectedErrorType: pkg.NewErrSecretStore("forbidden"),
+		},
+		{
+			name:              "New secret client with unauthenticated token",
+			authToken:         "invalidToken",
+			expectError:       true,
+			expectedErrorType: pkg.NewErrSecretStore("forbidden"),
+		},
+		{
+			name:              "New secret client with unrenewable token",
+			authToken:         "unrenewableToken",
+			expectError:       false,
+			expectedErrorType: nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfgHTTP := SecretConfig{
+				Host:           host,
+				Port:           portNum,
+				Protocol:       "http",
+				Authentication: AuthenticationInfo{AuthToken: test.authToken},
+			}
+			c, err := NewSecretClient(cfgHTTP, mockLogger, bkgCtx, errCh)
+
+			if test.expectedErrorType != nil && err == nil {
+				t.Errorf("Expected error %v but none was recieved", test.expectedErrorType)
+			}
+
+			if !test.expectError && err != nil {
+				t.Errorf("Unexpected error: %s", err.Error())
+			}
+
+			if test.expectError && test.expectedErrorType != nil && err != nil {
+				eet := reflect.TypeOf(test.expectedErrorType)
+				aet := reflect.TypeOf(err)
+				if !aet.AssignableTo(eet) {
+					t.Errorf("Expected error of type %v, but got an error of type %v", eet, aet)
+				}
+			}
+
+			client := c.(Client)
+
+			// look up the token data again after renewal
+			lookupTokenData, err := client.getTokenLookupResponseData()
+			if !test.expectError && err != nil {
+				t.Errorf("error on cfgAuthToken %s: %s", test.authToken, err)
+			}
+
+			if !test.expectError && lookupTokenData.Data.Renewable &&
+				lookupTokenData.Data.Ttl < tokenPeriod/2 {
+				tokenData, _ := tokenDataMap.Load(test.authToken)
+				tokenTtl := tokenData.(TookenLookupMetadata).Ttl
+				t.Errorf("the token period %d and failed to renew token: the current TTL %d and the old TTL: %d",
+					tokenPeriod, lookupTokenData.Data.Ttl, tokenTtl)
+			}
+		})
+	}
+	// wait for some time to allow errCh to be consumed if any
+	time.Sleep(7 * time.Second)
+}
+
+func getMockTokenServer(tokenDataMap *sync.Map) *httptest.Server {
+
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		urlPath := req.URL.String()
+		if req.Method == http.MethodGet && urlPath == "/v1/auth/token/lookup-self" {
+			token := req.Header.Get(AuthTypeHeader)
+			sampleTokenLookup, exists := tokenDataMap.Load(token)
+			if !exists {
+				rw.WriteHeader(403)
+				_, _ = rw.Write([]byte("permission denied"))
+			} else {
+				resp := &TokenLookupResponse{
+					Data: sampleTokenLookup.(TookenLookupMetadata),
+				}
+				if ret, err := json.Marshal(resp); err != nil {
+					rw.WriteHeader(500)
+					_, _ = rw.Write([]byte(err.Error()))
+				} else {
+					rw.WriteHeader(200)
+					_, _ = rw.Write(ret)
+				}
+			}
+		} else if req.Method == http.MethodPost && urlPath == "/v1/auth/token/renew-self" {
+			token := req.Header.Get(AuthTypeHeader)
+			sampleTokenLookup, exists := tokenDataMap.Load(token)
+			if !exists {
+				rw.WriteHeader(403)
+				_, _ = rw.Write([]byte("permission denied"))
+			} else {
+				currentTtl := sampleTokenLookup.(TookenLookupMetadata).Ttl
+				if currentTtl <= 0 {
+					// already expired
+					rw.WriteHeader(403)
+					_, _ = rw.Write([]byte("permission denied"))
+				} else {
+					tokenPeriod := sampleTokenLookup.(TookenLookupMetadata).Period
+
+					tokenDataMap.Store(token, TookenLookupMetadata{
+						Renewable: true,
+						Ttl:       tokenPeriod,
+						Period:    tokenPeriod,
+					})
+					rw.WriteHeader(200)
+					_, _ = rw.Write([]byte("token renewed"))
+				}
+			}
+		} else {
+			rw.WriteHeader(404)
+			_, _ = rw.Write([]byte(fmt.Sprintf("Unknown urlPath: %s", urlPath)))
+		}
+	}))
+	return server
 }
