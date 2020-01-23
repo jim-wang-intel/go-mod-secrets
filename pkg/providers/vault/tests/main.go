@@ -83,7 +83,8 @@ func main() {
 	for {
 		select {
 		case err = <-errChan:
-			logger.Debug(fmt.Sprint("Error from errChan ", err))
+			logger.Error(fmt.Sprint("Error from errChan ", err))
+			failures++
 
 		case <-lookUpSelfTicker.C:
 			var response lookUpSelfResponse
