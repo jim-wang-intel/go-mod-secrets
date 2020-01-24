@@ -40,10 +40,10 @@ func main() {
 
 	// Create token
 	vaultPort := 8200
-	tokenCreatPath := "/v1/auth/token/create"
+	tokenCreatePath := "/v1/auth/token/create"
 	tokenLookupSelfPath := "/v1/auth/token/lookup-self"
 
-	urlCreateToken := fmt.Sprintf("http://%s:%d%s", vaultHost, vaultPort, tokenCreatPath)
+	urlCreateToken := fmt.Sprintf("http://%s:%d%s", vaultHost, vaultPort, tokenCreatePath)
 	urlLookupSelf := fmt.Sprintf("http://%s:%d%s", vaultHost, vaultPort, tokenLookupSelfPath)
 
 	createTokenData := fmt.Sprintf(`{"ttl": "%s", "renewable": true, "period":"%s", "no_parent" : true}`, tokenPeriod.String(), tokenPeriod.String())
