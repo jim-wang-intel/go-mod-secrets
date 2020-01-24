@@ -70,7 +70,7 @@ func main() {
 	errChan := make(chan error)
 
 	// Create SecrectClient to start the token refresh cycle
-	_, err := vault.NewSecretClient(config, logger, ctx, errChan)
+	_, err := vault.NewSecretClient(ctx, config, logger, errChan)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -19,7 +19,7 @@ package vault
 type MockLogger struct {
 }
 
-// NewMockClient creates a mock instance of LoggingClient
+// NewMockClient creates a mock instance of loggingClient implementation
 func NewMockClient() loggingClient {
 	return MockLogger{}
 }

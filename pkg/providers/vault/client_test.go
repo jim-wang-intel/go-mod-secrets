@@ -1,5 +1,6 @@
 /*******************************************************************************
  * Copyright 2019 Dell Inc.
+ * Copyright 2020 Intel Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -160,7 +161,7 @@ func TestNewSecretClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			errCh := make(chan error, 1)
 
-			c, err := NewSecretClient(tt.cfg, mockLogger, bkgCtx, errCh)
+			c, err := NewSecretClient(bkgCtx, tt.cfg, mockLogger, errCh)
 			if err != nil {
 				if !tt.expectErr {
 					t.Errorf("unexpected error: %v", err)
@@ -638,7 +639,7 @@ func TestHttpSecretStoreManager_SetValue(t *testing.T) {
 	}
 }
 
-func TestMultipleTokneRenewals(t *testing.T) {
+func TestMultipleTokenRenewals(t *testing.T) {
 	// setup
 	tokenPeriod := 6
 	var tokenDataMap sync.Map
@@ -754,7 +755,7 @@ func TestMultipleTokneRenewals(t *testing.T) {
 				Protocol:       "http",
 				Authentication: AuthenticationInfo{AuthToken: test.authToken},
 			}
-			c, err := NewSecretClient(cfgHTTP, mockLogger, bkgCtx, errCh)
+			c, err := NewSecretClient(bkgCtx, cfgHTTP, mockLogger, errCh)
 
 			if test.expectedErrorType != nil && err == nil {
 				t.Errorf("Expected error %v but none was recieved", test.expectedErrorType)
@@ -784,7 +785,7 @@ func TestMultipleTokneRenewals(t *testing.T) {
 				lookupTokenData.Data.Ttl < tokenPeriod/2 {
 				tokenData, _ := tokenDataMap.Load(test.authToken)
 				tokenTtl := tokenData.(TokenLookupMetadata).Ttl
-				t.Errorf("the token period %d and failed to renew token: the current TTL %d and the old TTL: %d",
+				t.Errorf("failed to renew token with the token period %d: the current TTL %d and the old TTL: %d",
 					tokenPeriod, lookupTokenData.Data.Ttl, tokenTtl)
 			}
 		})

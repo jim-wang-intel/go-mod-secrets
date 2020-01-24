@@ -1,5 +1,6 @@
 /*******************************************************************************
  * Copyright 2019 Dell Inc.
+ * Copyright 2020 Intel Corp.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -51,10 +52,14 @@ var vaultTokenToCancelFunc = make(map[string]context.CancelFunc)
 // lc is any logging client that implements the loggingClient interface;
 // today EdgeX's logger.LoggingClient from go-mod-core-contracts satisfies this implementation
 //
-// bkgCtx is the background context that can be used to cancel or cleanup the background process when it is no longer needed
+// ctx is the background context that can be used to cancel or cleanup the background process when it is no longer needed
 //
 // errChan is the error channel to receive any error from the background go-routine calls
-func NewSecretClient(config SecretConfig, lc loggingClient, bkgCtx context.Context, errChan chan<- error) (pkg.SecretClient, error) {
+func NewSecretClient(ctx context.Context, config SecretConfig, lc loggingClient, errChan chan<- error) (pkg.SecretClient, error) {
+	if ctx == nil {
+		return nil, pkg.NewErrSecretStore("background ctx is required and cannot be nil")
+	}
+
 	tokenStr := config.Authentication.AuthToken
 	if tokenStr == "" {
 		return nil, pkg.NewErrSecretStore("AuthToken is required in config")
@@ -79,17 +84,14 @@ func NewSecretClient(config SecretConfig, lc loggingClient, bkgCtx context.Conte
 		lc:         lc,
 	}
 
-	if bkgCtx == nil {
-		bkgCtx = context.Background()
-	}
 	// if there is context already associated with the given token,
 	// then we cancel it first
 	if cancel, exists := vaultTokenToCancelFunc[tokenStr]; exists {
 		cancel()
 	}
 
-	ctx, cancel := context.WithCancel(bkgCtx)
-	if err = secretClient.refreshToken(ctx, errChan); err != nil {
+	cCtx, cancel := context.WithCancel(ctx)
+	if err = secretClient.refreshToken(cCtx, errChan); err != nil {
 		cancel()
 	} else {
 		vaultTokenToCancelFunc[tokenStr] = cancel
@@ -113,7 +115,7 @@ func (c Client) refreshToken(ctx context.Context, errChan chan<- error) error {
 		return nil
 	}
 
-	// the renew internval is half of period value
+	// the renew interval is half of period value
 	tokenPeriod := time.Duration(tokenData.Data.Period) * time.Second
 	renewInterval := tokenPeriod / 2
 	if renewInterval <= 0 {
