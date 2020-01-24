@@ -31,8 +31,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/clients/logger"
-
 	"github.com/edgexfoundry/go-mod-secrets/pkg"
 )
 
@@ -157,7 +155,7 @@ func TestNewSecretClient(t *testing.T) {
 		{"NewSecretClient with valid RetryWaitPeriod", cfgValidTime, false, &s},
 		{"NewSecretClient with empty token", cfgEmptyToken, true, nil},
 	}
-	mockLogger := logger.MockLogger{}
+	mockLogger := NewMockClient()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			errCh := make(chan error, 1)
@@ -697,7 +695,7 @@ func TestMultipleTokneRenewals(t *testing.T) {
 		}
 	}()
 
-	mockLogger := logger.MockLogger{}
+	mockLogger := NewMockClient()
 	tests := []struct {
 		name              string
 		authToken         string

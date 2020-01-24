@@ -20,3 +20,12 @@ import "net/http"
 type Caller interface {
 	Do(req *http.Request) (*http.Response, error)
 }
+
+type loggingClient interface {
+	// Debug logs a message at the DEBUG severity level
+	Debug(msg string, args ...interface{})
+	// Info logs a message at the INFO severity level
+	Info(msg string, args ...interface{})
+	// Warn logs a message at the WARN severity level
+	Warn(msg string, args ...interface{})
+}

@@ -25,8 +25,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/edgexfoundry/go-mod-core-contracts/clients/logger"
-
 	"github.com/edgexfoundry/go-mod-secrets/pkg"
 )
 
@@ -40,7 +38,7 @@ type Client struct {
 	HttpCaller Caller
 
 	// internal member variables
-	lc logger.LoggingClient
+	lc loggingClient
 }
 
 // package stateful map variable to handle the case of the same caller to have
@@ -49,10 +47,14 @@ type Client struct {
 var vaultTokenToCancelFunc = make(map[string]context.CancelFunc)
 
 // NewSecretClient constructs a SecretClient which communicates with Vault via HTTP(S)
-// lc is the Edgex customized logger
+//
+// lc is any logging client that implements the loggingClient interface;
+// today EdgeX's logger.LoggingClient from go-mod-core-contracts satisfies this implementation
+//
 // bkgCtx is the background context that can be used to cancel or cleanup the background process when it is no longer needed
+//
 // errChan is the error channel to receive any error from the background go-routine calls
-func NewSecretClient(config SecretConfig, lc logger.LoggingClient, bkgCtx context.Context, errChan chan<- error) (pkg.SecretClient, error) {
+func NewSecretClient(config SecretConfig, lc loggingClient, bkgCtx context.Context, errChan chan<- error) (pkg.SecretClient, error) {
 	tokenStr := config.Authentication.AuthToken
 	if tokenStr == "" {
 		return nil, pkg.NewErrSecretStore("AuthToken is required in config")
