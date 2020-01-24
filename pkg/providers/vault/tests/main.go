@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/edgexfoundry/go-mod-core-contracts/clients/logger"
@@ -48,10 +49,11 @@ func main() {
 	createTokenData := fmt.Sprintf(`{"ttl": "%s", "renewable": true, "period":"%s", "no_parent" : true}`, tokenPeriod.String(), tokenPeriod.String())
 
 	response := makeHTTPCall(urlCreateToken, "POST", createTokenData, rootToken)
-	var createTokenResp creatTokenResponse
+	var createTokenResp createTokenResponse
 
 	if err := json.Unmarshal(response, &createTokenResp); err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 
 	authToken := createTokenResp.Auth.ClientToken
@@ -70,7 +72,8 @@ func main() {
 	// Create SecrectClient to start the token refresh cycle
 	_, err := vault.NewSecretClient(config, logger, ctx, errChan)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 
 	timesUpticker := time.NewTicker(totalTimeWindow)
@@ -91,7 +94,8 @@ func main() {
 			lookupData := makeHTTPCall(urlLookupSelf, "GET", "", authToken)
 
 			if err := json.Unmarshal(lookupData, &response); err != nil {
-				panic(err)
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
 			}
 
 			logger.Debug(fmt.Sprintf("Check lookup-self for token ttl: %v, period: %v", response.Data.TTL, response.Data.Period))
@@ -131,14 +135,16 @@ func makeHTTPCall(url string, httpMethod string, data string, token string) []by
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
 
 	return body
@@ -150,7 +156,7 @@ type auth struct {
 	Renewable     bool   `json:"renewable"`
 }
 
-type creatTokenResponse struct {
+type createTokenResponse struct {
 	Auth auth `json:"auth"`
 }
 
@@ -163,7 +169,7 @@ type lookUpSelfData struct {
 	Period int `json:"period"`
 }
 
-func (obj creatTokenResponse) String() string {
+func (obj createTokenResponse) String() string {
 	val, _ := json.Marshal(obj)
 	return string(val)
 }
