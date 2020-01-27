@@ -161,7 +161,9 @@ func TestNewSecretClient(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			errCh := make(chan error, 1)
 
-			c, err := NewSecretClient(bkgCtx, tt.cfg, mockLogger, errCh)
+			factory := NewSecretClientFactory()
+
+			c, err := factory.NewSecretClient(bkgCtx, tt.cfg, mockLogger, errCh)
 			if err != nil {
 				if !tt.expectErr {
 					t.Errorf("unexpected error: %v", err)
@@ -747,6 +749,7 @@ func TestMultipleTokenRenewals(t *testing.T) {
 		},
 	}
 
+	factory := NewSecretClientFactory()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			cfgHTTP := SecretConfig{
@@ -755,7 +758,8 @@ func TestMultipleTokenRenewals(t *testing.T) {
 				Protocol:       "http",
 				Authentication: AuthenticationInfo{AuthToken: test.authToken},
 			}
-			c, err := NewSecretClient(bkgCtx, cfgHTTP, mockLogger, errCh)
+
+			c, err := factory.NewSecretClient(bkgCtx, cfgHTTP, mockLogger, errCh)
 
 			if test.expectedErrorType != nil && err == nil {
 				t.Errorf("Expected error %v but none was recieved", test.expectedErrorType)

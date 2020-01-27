@@ -42,64 +42,6 @@ type Client struct {
 	lc loggingClient
 }
 
-// package stateful map variable to handle the case of the same caller to have
-// multiple secret clients with potentially the same tokens while renewing token
-// in the background go-routine
-var vaultTokenToCancelFunc = make(map[string]context.CancelFunc)
-
-// NewSecretClient constructs a SecretClient which communicates with Vault via HTTP(S)
-//
-// lc is any logging client that implements the loggingClient interface;
-// today EdgeX's logger.LoggingClient from go-mod-core-contracts satisfies this implementation
-//
-// ctx is the background context that can be used to cancel or cleanup the background process when it is no longer needed
-//
-// errChan is the error channel to receive any error from the background go-routine calls
-func NewSecretClient(ctx context.Context, config SecretConfig, lc loggingClient, errChan chan<- error) (pkg.SecretClient, error) {
-	if ctx == nil {
-		return nil, pkg.NewErrSecretStore("background ctx is required and cannot be nil")
-	}
-
-	tokenStr := config.Authentication.AuthToken
-	if tokenStr == "" {
-		return nil, pkg.NewErrSecretStore("AuthToken is required in config")
-	}
-
-	httpClient, err := createHTTPClient(config)
-	if err != nil {
-		return Client{}, err
-	}
-
-	if config.RetryWaitPeriod != "" {
-		retryTimeDuration, err := time.ParseDuration(config.RetryWaitPeriod)
-		if err != nil {
-			return nil, err
-		}
-		config.retryWaitPeriodTime = retryTimeDuration
-	}
-
-	secretClient := Client{
-		HttpConfig: config,
-		HttpCaller: httpClient,
-		lc:         lc,
-	}
-
-	// if there is context already associated with the given token,
-	// then we cancel it first
-	if cancel, exists := vaultTokenToCancelFunc[tokenStr]; exists {
-		cancel()
-	}
-
-	cCtx, cancel := context.WithCancel(ctx)
-	if err = secretClient.refreshToken(cCtx, errChan); err != nil {
-		cancel()
-	} else {
-		vaultTokenToCancelFunc[tokenStr] = cancel
-	}
-
-	return secretClient, err
-}
-
 func (c Client) refreshToken(ctx context.Context, errChan chan<- error) error {
 	token := c.HttpConfig.Authentication.AuthToken
 
