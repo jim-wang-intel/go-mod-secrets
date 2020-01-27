@@ -733,13 +733,13 @@ func TestMultipleTokenRenewals(t *testing.T) {
 			name:              "New secret client with expired token, no TTL remaining",
 			authToken:         "expiredToken",
 			expectError:       true,
-			expectedErrorType: pkg.NewErrSecretStore("forbidden"),
+			expectedErrorType: errHttpResponse{statusCode: 403, errMsg: "forbidden"},
 		},
 		{
 			name:              "New secret client with unauthenticated token",
 			authToken:         "invalidToken",
 			expectError:       true,
-			expectedErrorType: pkg.NewErrSecretStore("forbidden"),
+			expectedErrorType: errHttpResponse{statusCode: 403, errMsg: "forbidden"},
 		},
 		{
 			name:              "New secret client with unrenewable token",

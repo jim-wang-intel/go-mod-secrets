@@ -29,10 +29,6 @@ import (
 	"github.com/edgexfoundry/go-mod-secrets/pkg"
 )
 
-const (
-	AuthTypeHeader = "X-Vault-Token"
-)
-
 // Client defines the behavior for interacting with the Vault REST secret key/value store via HTTP(S).
 type Client struct {
 	HttpConfig SecretConfig
@@ -43,8 +39,6 @@ type Client struct {
 }
 
 func (c Client) refreshToken(ctx context.Context, errChan chan<- error) error {
-	token := c.HttpConfig.Authentication.AuthToken
-
 	tokenData, err := c.getTokenLookupResponseData()
 
 	if err != nil {
@@ -53,7 +47,7 @@ func (c Client) refreshToken(ctx context.Context, errChan chan<- error) error {
 
 	if !tokenData.Data.Renewable {
 		// token is not renewable, log warning and return
-		c.lc.Warn(fmt.Sprintf("token '%s' is not renewable from the secret store", token))
+		c.lc.Warn("token is not renewable from the secret store")
 		return nil
 	}
 
@@ -62,7 +56,7 @@ func (c Client) refreshToken(ctx context.Context, errChan chan<- error) error {
 	renewInterval := tokenPeriod / 2
 	if renewInterval <= 0 {
 		// no renew
-		c.lc.Warn(fmt.Sprintf("token '%s' renewInterval is 0, no token renewal", token))
+		c.lc.Warn("no token renewal since renewInterval is 0")
 		return nil
 	}
 
@@ -116,12 +110,15 @@ func (c Client) getTokenLookupResponseData() (*TokenLookupResponse, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, pkg.NewErrSecretStore(fmt.Sprintf("tried to lookup token but received a '%d' response from the secret store", resp.StatusCode))
+		return nil, errHttpResponse{
+			statusCode: resp.StatusCode,
+			errMsg:     "failed to lookup token",
+		}
 	}
 
-	defer resp.Body.Close()
 	var result TokenLookupResponse
 	jsonDec := json.NewDecoder(resp.Body)
 	if jsonDec == nil {
@@ -150,14 +147,16 @@ func (c Client) renewToken() error {
 	if err != nil {
 		return err
 	}
-
-	if resp.StatusCode != http.StatusOK {
-		return pkg.NewErrSecretStore(fmt.Sprintf("tried to renew token but received a '%d' response from the secret store", resp.StatusCode))
-	}
-
 	defer resp.Body.Close()
 
-	c.lc.Debug(fmt.Sprintf("successfully renewed token %s", c.HttpConfig.Authentication.AuthToken))
+	if resp.StatusCode != http.StatusOK {
+		return errHttpResponse{
+			statusCode: resp.StatusCode,
+			errMsg:     "failed to renew token",
+		}
+	}
+
+	c.lc.Debug("token is successfully renewed")
 	return nil
 }
 
