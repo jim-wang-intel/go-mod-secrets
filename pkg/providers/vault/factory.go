@@ -17,6 +17,7 @@ package vault
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/edgexfoundry/go-mod-secrets/pkg"
@@ -28,7 +29,11 @@ import (
 type vaultTokenToCancelFuncMap map[string]context.CancelFunc
 
 type secretClientFactory struct {
+	// tokenCancelFunc is an internal map with token as key and
+	// the context.cancel function as value
 	tokenCancelFunc vaultTokenToCancelFuncMap
+	// cacheMutex protects the 'cache' from race conditions.
+	mapMutex *sync.Mutex
 }
 
 // NewSecretClientFactory creates a new factory for manufactoring secret clients
@@ -37,6 +42,7 @@ type secretClientFactory struct {
 func NewSecretClientFactory() *secretClientFactory {
 	return &secretClientFactory{
 		tokenCancelFunc: make(vaultTokenToCancelFuncMap),
+		mapMutex:        &sync.Mutex{},
 	}
 }
 
@@ -77,17 +83,24 @@ func (factory *secretClientFactory) NewSecretClient(ctx context.Context, config 
 		lc:         lc,
 	}
 
+	factory.mapMutex.Lock()
 	// if there is context already associated with the given token,
 	// then we cancel it first
 	if cancel, exists := factory.tokenCancelFunc[tokenStr]; exists {
 		cancel()
 	}
+	factory.mapMutex.Unlock()
 
 	cCtx, cancel := context.WithCancel(ctx)
 	if err = secretClient.refreshToken(cCtx, errChan); err != nil {
 		cancel()
+		factory.mapMutex.Lock()
+		delete(factory.tokenCancelFunc, tokenStr)
+		factory.mapMutex.Unlock()
 	} else {
+		factory.mapMutex.Lock()
 		factory.tokenCancelFunc[tokenStr] = cancel
+		factory.mapMutex.Unlock()
 	}
 
 	return secretClient, err

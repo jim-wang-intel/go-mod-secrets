@@ -642,6 +642,8 @@ func TestHttpSecretStoreManager_SetValue(t *testing.T) {
 }
 
 func TestMultipleTokenRenewals(t *testing.T) {
+	// run in parallel with other tests
+	t.Parallel()
 	// setup
 	tokenPeriod := 6
 	var tokenDataMap sync.Map
@@ -688,13 +690,19 @@ func TestMultipleTokenRenewals(t *testing.T) {
 
 	bkgCtx := context.Background()
 
+	done := make(chan bool)
 	// error channel to receive any error from background process
 	errCh := make(chan error, 1)
 	go func() {
-		tokenErr := <-errCh
-
-		if tokenErr != nil {
-			t.Errorf("error on handling token renewal: %s", tokenErr)
+		for {
+			select {
+			case tokenErr := <-errCh:
+				if tokenErr != nil {
+					t.Errorf("error on handling token renewal: %s", tokenErr)
+				}
+			case <-done:
+				return
+			}
 		}
 	}()
 
@@ -796,6 +804,146 @@ func TestMultipleTokenRenewals(t *testing.T) {
 	}
 	// wait for some time to allow errCh to be consumed if any
 	time.Sleep(7 * time.Second)
+	done <- true
+}
+
+func TestMultipleClientsFailureCase(t *testing.T) {
+	// run in parallel with other tests
+	t.Parallel()
+	// setup
+	tokenPeriod := 6
+	var tokenDataMap sync.Map
+
+	// expired token
+	tokenDataMap.Store("expiredToken", TokenLookupMetadata{
+		Renewable: true,
+		Ttl:       0,
+		Period:    tokenPeriod,
+	})
+
+	server := getMockTokenServer(&tokenDataMap)
+	defer server.Close()
+
+	serverUrl, err := url.Parse(server.URL)
+	if err != nil {
+		t.Errorf("error on parsing server url %s: %s", server.URL, err)
+	}
+	host, port, _ := net.SplitHostPort(serverUrl.Host)
+	portNum, _ := strconv.Atoi(port)
+
+	bkgCtx := context.Background()
+
+	done := make(chan bool)
+	// error channel to receive any error from background process
+	errCh := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case tokenErr := <-errCh:
+				if tokenErr != nil {
+					t.Errorf("error on handling token renewal: %s", tokenErr)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	mockLogger := NewMockClient()
+	factory := NewSecretClientFactory()
+	cfgHTTP := SecretConfig{
+		Host:           host,
+		Port:           portNum,
+		Protocol:       "http",
+		Authentication: AuthenticationInfo{AuthToken: "expiredToken"},
+	}
+
+	_, err = factory.NewSecretClient(bkgCtx, cfgHTTP, mockLogger, errCh)
+	// it will fail since the token is expired
+	if err == nil {
+		t.Errorf("expecting an error for expired token")
+	}
+
+	// create a second secret client with the same expired token
+	_, err = factory.NewSecretClient(bkgCtx, cfgHTTP, mockLogger, errCh)
+	if err == nil {
+		t.Errorf("expecting an error for expired token")
+	} else {
+		fmt.Println(err)
+	}
+
+	// wait for some time to allow errCh to be consumed if any
+	time.Sleep(10 * time.Second)
+	done <- true
+}
+
+func TestConcurrentSecretClientTokenRenewals(t *testing.T) {
+	// run in parallel with other tests
+	t.Parallel()
+	// setup
+	tokenPeriod := 6
+	var tokenDataMap sync.Map
+
+	// ttl < half of period
+	tokenDataMap.Store("testToken3", TokenLookupMetadata{
+		Renewable: true,
+		Ttl:       tokenPeriod * 3 / 10,
+		Period:    tokenPeriod,
+	})
+
+	server := getMockTokenServer(&tokenDataMap)
+	defer server.Close()
+
+	serverUrl, err := url.Parse(server.URL)
+	if err != nil {
+		t.Errorf("error on parsing server url %s: %s", server.URL, err)
+	}
+	host, port, _ := net.SplitHostPort(serverUrl.Host)
+	portNum, _ := strconv.Atoi(port)
+
+	bkgCtx := context.Background()
+
+	done := make(chan bool)
+	// error channel to receive any error from background process
+	errCh := make(chan error, 1)
+	go func() {
+		for {
+			select {
+			case tokenErr := <-errCh:
+				if tokenErr != nil {
+					t.Errorf("error on handling token renewal: %s", tokenErr)
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	mockLogger := NewMockClient()
+	factory := NewSecretClientFactory()
+	cfgHTTP := SecretConfig{
+		Host:           host,
+		Port:           portNum,
+		Protocol:       "http",
+		Authentication: AuthenticationInfo{AuthToken: "testToken3"},
+	}
+
+	// number of clients to be created to run in go-routines
+	numOfClients := 100
+	for i := 0; i < numOfClients; i++ {
+		go func(ith int) {
+			_, err = factory.NewSecretClient(bkgCtx, cfgHTTP, mockLogger, errCh)
+			// verify if any error
+			if err != nil {
+				t.Errorf("found error in secret client %d: %v", ith, err)
+			}
+			time.Sleep(15 * time.Second)
+		}(i)
+	}
+
+	// wait for some time to allow errCh to be consumed if any
+	time.Sleep(15 * time.Second)
+	done <- true
 }
 
 func getMockTokenServer(tokenDataMap *sync.Map) *httptest.Server {
